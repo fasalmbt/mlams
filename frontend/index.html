@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>MLAMS — Manpower Lead & Account Management</title>
+  <link rel="stylesheet" href="assets/css/style.css">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%234f8ef7'/><text x='6' y='22' font-size='18' fill='white' font-family='monospace' font-weight='bold'>M</text></svg>">
+  <script>
+    if (localStorage.getItem('mlams_theme') === 'dark') {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    }
+  </script>
+</head>
+<body>
+
+<!-- ── TOAST CONTAINER ── -->
+<div id="toast-container"></div>
+
+<!-- ── LOGIN PAGE ── -->
+<div id="login-page">
+  <div class="login-card">
+    <div class="login-logo">
+      <span class="login-badge">v1.0</span>
+      <h1>MLAMS</h1>
+      <span>Manpower Lead & Account Management System</span>
+    </div>
+
+    <div id="login-error" style="display:none;background:var(--red-dim);border:1px solid rgba(231,76,60,0.3);border-radius:var(--radius);padding:10px 14px;font-size:13px;color:var(--red);margin-bottom:16px"></div>
+
+    <div class="form-group">
+      <label class="form-label">Email Address</label>
+      <input class="form-control" id="login-email" type="email" placeholder="you@company.com" autocomplete="email">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Password</label>
+      <input class="form-control" id="login-password" type="password" placeholder="••••••••" autocomplete="current-password">
+    </div>
+
+    <button class="btn btn-primary" id="login-btn" onclick="handleLogin()" style="width:100%;justify-content:center;padding:11px;font-size:14px;margin-top:8px">
+      Sign In →
+    </button>
+
+  </div>
+</div>
+
+<!-- ── MAIN APP ── -->
+<div id="app" style="display:none">
+  <aside id="sidebar"></aside>
+  <main id="main">
+    <div class="topbar">
+      <button class="mobile-menu-btn" onclick="toggleSidebar()">☰</button>
+      <h3 id="topbar-title">Dashboard</h3>
+      <div class="topbar-actions" id="topbar-actions"></div>
+    </div>
+    <div class="content" id="content">
+      <div class="loading-center"><div class="spinner"></div> Loading…</div>
+    </div>
+  </main>
+</div>
+
+<style>
+#login-btn .spinner { display: inline-block; width: 14px; height: 14px; margin-right: 6px; }
+</style>
+
+<script src="src/api/client.js"></script>
+<script src="src/pages/leads.js"></script>
+<script src="src/pages/finance.js"></script>
+<script>
+
+// ── LOGIN HANDLERS ──────────────────────────────────────────────────────
+
+async function handleLogin() {
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const btn = document.getElementById('login-btn');
+  const errEl = document.getElementById('login-error');
+
+  if (!email || !password) {
+    errEl.textContent = 'Please enter email and password.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Signing in…';
+  errEl.style.display = 'none';
+
+  try {
+    await login(email, password);
+    showApp();
+  } catch (e) {
+    errEl.textContent = e.message || 'Invalid credentials. Please try again.';
+    errEl.style.display = 'block';
+    btn.disabled = false;
+    btn.innerHTML = 'Sign In →';
+  }
+}
+
+// Enter key on login
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && document.getElementById('login-page').style.display !== 'none') {
+    handleLogin();
+  }
+});
+
+// ── APP INIT ────────────────────────────────────────────────────────────
+function showLogin() {
+  document.getElementById('login-page').style.display = 'flex';
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('login-email').value = '';
+  document.getElementById('login-password').value = '';
+}
+
+async function showApp() {
+  document.getElementById('login-page').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
+
+  // Load pending counts for sidebar badges
+  const counts = await loadPendingCounts();
+  updateSidebar(counts);
+
+  // Navigate to dashboard
+  navigate('dashboard');
+
+  // Refresh sidebar counts every 60s
+  setInterval(async () => {
+    const c = await loadPendingCounts();
+    updateSidebar(c);
+  }, 60000);
+}
+
+async function loadPendingCounts() {
+  const role = state.user?.role;
+  const counts = {};
+  try {
+    if (role === 'telecaller') {
+      const leads = await api('GET', '/leads');
+      const pending = leads.filter(l => ['New','Busy','Call Back'].includes(l.status));
+      if (pending.length) counts['my-leads'] = pending.length;
+    } else if (role === 'counselor') {
+      const leads = await api('GET', '/leads?stage=counseling');
+      if (leads.length) counts['counseling'] = leads.length;
+    } else if (role === 'accountant') {
+      const leads = await api('GET', '/leads?stage=accounts');
+      if (leads.length) counts['accounts'] = leads.length;
+    } else if (role === 'admin') {
+      const data = await api('GET', '/dashboard');
+      const counseling = data.by_stage?.counseling || 0;
+      const accounts = data.by_stage?.accounts || 0;
+      if (counseling) counts['leads'] = counseling + accounts;
+    }
+  } catch {}
+  return counts;
+}
+
+// ── BOOT ────────────────────────────────────────────────────────────────
+(async () => {
+  const authed = await checkAuth();
+  if (authed) {
+    showApp();
+  } else {
+    showLogin();
+    document.getElementById('login-email').focus();
+  }
+})();
+
+</script>
+</body>
+</html>
